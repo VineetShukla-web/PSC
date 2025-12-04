@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Risk Management Calculator (Exness-like)</title>
+<style>
+  body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;max-width:900px;margin:24px auto;padding:18px;color:#111}
+  h1{font-size:1.25rem;margin-bottom:8px}
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+  label{display:block;font-size:0.85rem;margin-bottom:6px}
+  input,select{width:100%;padding:8px;border:1px solid #ddd;border-radius:8px;font-size:0.95rem}
+  .row{margin-bottom:12px}
+  .card{padding:12px;border-radius:12px;background:#fbfbfb;border:1px solid #eee}
+  .results{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:12px}
+  .res{padding:12px;border-radius:8px;background:#fff;border:1px solid #eee}
+  .muted{font-size:0.85rem;color:#666}
+  button{padding:8px 12px;border-radius:8px;border:0;background:#0a66ff;color:#fff;cursor:pointer}
+  small{display:block;color:#666;margin-top:6px}
+  @media(max-width:700px){.grid{grid-template-columns:1fr}.results{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+  <h1>Risk Management Calculator (Exness-style)</h1>
+  <div class="card">
+    <div class="grid">
+      <div class="row">
+        <label>Account balance</label>
+        <input id="balance" type="number" step="0.01" value="1000" />
+        <small class="muted">Amount in account currency</small>
+      </div>
+
+      <div class="row">
+        <label>Account currency</label>
+        <select id="accountCurrency">
+          <option>USD</option><option>EUR</option><option>JPY</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label>Risk per trade</label>
+        <div style="display:flex;gap:8px">
+          <input id="riskPercent" type="number" step="0.01" value="1" />
+          <select id="riskMode">
+            <option value="percent">%</option>
+            <option value="amount">Amount</option>
+          </select>
+        </div>
+        <small class="muted">Choose percent or absolute amount</small>
+      </div>
+
+      <div class="row">
+        <label>Symbol</label>
+        <select id="symbol">
+          <option value="EURUSD">EURUSD</option>
+          <option value="GBPUSD">GBPUSD</option>
+          <option value="USDJPY">USDJPY</option>
+          <option value="AUDUSD">AUDUSD</option>
+          <option value="BTCUSD">BTCUSD</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label>Entry price</label>
+        <input id="entry" type="number" step="0.0001" value="1.1000" />
+      </div>
+
+      <div class="row">
+        <label>Stop loss price</label>
+        <input id="sl" type="number" step="0.0001" value="1.0950" />
+      </div>
+
+      <div class="row">
+        <label>Take profit price (optional)</label>
+        <input id="tp" type="number" step="0.0001" placeholder="leave empty if not used" />
+      </div>
+
+      <div class="row">
+        <label>Leverage (optional)</label>
+        <input id="leverage" type="number" step="1" value="100" />
+      </div>
+
+      <div class="row">
+        <label>Trade direction</label>
+        <select id="direction"><option>Buy</option><option>Sell</option></select>
+      </div>
+    </div>
+
+    <div style="margin-top:12px">
+      <button id="calc">Calculate</button>
+      <button id="copy" style="margin-left:8px">Copy results</button>
+    </div>
+
+    <div class="results" id="resultsArea" style="margin-top:14px">
+      <div class="res">
+        <strong>Risk amount</strong>
+        <div id="riskAmount">—</div>
+        <small class="muted">Account currency</small>
+      </div>
+
+      <div class="res">
+        <strong>Stop loss (pips)</strong>
+        <div id="slPips">—</div>
+        <small class="muted">Pip size depends on symbol</small>
+      </div>
+
+      <div class="res">
+        <strong>Pip value per 1 lot</strong>
+        <div id="pipValue">—</div>
+        <small class="muted">In account currency</small>
+      </div>
+
+      <div class="res">
+        <strong>Suggested lot size</strong>
+        <div id="lotSize">—</div>
+        <small class="muted">Lots (1 lot = 100,000 units)</small>
+      </div>
+
+      <div class="res">
+        <strong>Required margin</strong>
+        <div id="margin">—</div>
+        <small class="muted">Based on leverage</small>
+      </div>
+
+      <div class="res">
+        <strong>Reward : Risk</strong>
+        <div id="rr">—</div>
+        <small class="muted">If TP given</small>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function(){
+  const el = id => document.getElementById(id);
+  function pipSizeForSymbol(sym){
+    if(sym.endsWith('JPY')) return 0.01;
+    if(sym==='BTCUSD') return 0.01; // approximate pip step for crypto display
+    return 0.0001;
+  }
+  function contractSize(){ return 100000; } // standard FX contract
+
+  function formatMoney(n){
+    if(!isFinite(n)) return '—';
+    return Number(n).toLocaleString(undefined,{maximumFractionDigits:2});
+  }
+  function roundStep(val,step){ return Math.round(val/step)*step; }
+
+  function calculate(){
+    const balance = parseFloat(el('balance').value) || 0;
+    const accountCurrency = el('accountCurrency').value;
+    const riskMode = el('riskMode').value;
+    const riskPercent = parseFloat(el('riskPercent').value) || 0;
+    const symbol = el('symbol').value;
+    const entry = parseFloat(el('entry').value);
+    const sl = parseFloat(el('sl').value);
+    const tpRaw = el('tp').value;
+    const tp = tpRaw?parseFloat(tpRaw):null;
+    const leverage = parseFloat(el('leverage').value) || 1;
+    const direction = el('direction').value;
+
+    // risk amount
+    const riskAmount = (riskMode==='percent') ? balance * (riskPercent/100) : riskPercent;
+
+    // pip size and SL pips
+    const pipStep = pipSizeForSymbol(symbol);
+    let slDistance = Math.abs(entry - sl);
+    const slPips = slDistance / pipStep;
+
+    // Pip value per 1 lot (approximation):
+    // For many FX pairs, pipValuePerLot ≈ (pip / quote) * contractSize.
+    // We'll approximate with: pipValue = (pipStep / entry) * contractSize * 1 /*account currency factor*/ / 100000
+    // Simpler, widely used approx: pip value per 1 lot ≈ (contractSize * pipStep) / entry
+    let pipValuePerLot;
+    if(!entry || entry === 0) pipValuePerLot = NaN;
+    else pipValuePerLot = (contractSize() * pipStep) / entry;
+
+    // For USD-quoted pairs and USD account this reduces to approx $10 per pip per lot.
+    // Lot size = RiskAmount / (SL_pips * pipValuePerLot)
+    let lotSize = (slPips * pipValuePerLot) ? (riskAmount / (slPips * pipValuePerLot)) : NaN;
+
+    // enforce minimums and step (common broker min lot 0.01, step 0.01)
+    if(isFinite(lotSize) && lotSize>0){
+      lotSize = Math.max(0.01, Math.floor(lotSize*100)/100); // floor to 2 decimals (safer)
+    }
+
+    // required margin = (notional / leverage)
+    // Notional = lotSize * contractSize * entry (in quote currency). If account currency differs, this needs conversion.
+    let notional = lotSize * contractSize() * (entry || 0);
+    let requiredMargin = notional / leverage;
+
+    // Reward:R isk
+    let rr = '—';
+    if(tp){
+      const tpDistance = Math.abs(tp - entry);
+      const tpPips = tpDistance / pipStep;
+      if(slPips>0) rr = (tpPips / slPips).toFixed(2) + ' : 1';
+      else rr = '—';
+    }
+
+    // fill UI
+    el('riskAmount').textContent = formatMoney(riskAmount) + ' ' + accountCurrency;
+    el('slPips').textContent = (isFinite(slPips) ? slPips.toFixed(1) : '—') + ' pips';
+    el('pipValue').textContent = (isFinite(pipValuePerLot) ? formatMoney(pipValuePerLot) + ' ' + accountCurrency + ' per lot' : '—');
+    el('lotSize').textContent = isFinite(lotSize) ? (lotSize.toFixed(2) + ' lots') : '—';
+    el('margin').textContent = isFinite(requiredMargin) ? formatMoney(requiredMargin) + ' ' + accountCurrency : '—';
+    el('rr').textContent = rr;
+
+    // return object for copying
+    return {
+      balance, accountCurrency, riskAmount, symbol, entry, sl, tp, slPips, pipValuePerLot, lotSize, requiredMargin, rr
+    };
+  }
+
+  el('calc').addEventListener('click', ()=>{
+    calculate();
+  });
+
+  el('copy').addEventListener('click', ()=>{
+    const d = calculate();
+    const txt = `Risk Calc — Balance: ${d.balance} ${d.accountCurrency}\nRisk amount: ${d.riskAmount.toFixed(2)} ${d.accountCurrency}\nSymbol: ${d.symbol}\nEntry: ${d.entry}\nSL: ${d.sl}\nSL pips: ${isFinite(d.slPips)?d.slPips.toFixed(1):'—'}\nLot size: ${isFinite(d.lotSize)?d.lotSize.toFixed(2)+' lots':'—'}\nPip value: ${isFinite(d.pipValuePerLot)?d.pipValuePerLot.toFixed(4)+' '+d.accountCurrency+' per lot':'—'}\nMargin req: ${isFinite(d.requiredMargin)?d.requiredMargin.toFixed(2)+' '+d.accountCurrency:'—'}\nR:R: ${d.rr}`;
+    navigator.clipboard?.writeText(txt).then(()=>alert('Results copied to clipboard.'));
+  });
+
+  // auto-calc initial
+  calculate();
+})();
+</script>
+</body>
+</html>
